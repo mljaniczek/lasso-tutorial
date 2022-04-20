@@ -182,6 +182,42 @@ gt::gt(final_results)
 
 ```
 
+# Histogram of results
+
+
+```{r}
+df <- data.frame(t(bind_cols(perm_results)))
+colnames(df) <- variable_names
+```
+
+Here we can display the permutation results from one of the variables that did not have a significant lasso coefficient. The green bars are a histogram of the estimates that came from the permutations. The vertical line is the observed coefficient estimate. 
+
+```{r}
+
+observed_val <- final_results %>% filter(term == "var1") %>% select(estimate)
+
+ggplot(df, aes(x=var1)) +
+  geom_histogram(color="black", fill="green", alpha=.4) +
+  geom_vline(color="navy",lwd=1,lty=2,xintercept = observed_val$estimate) +
+  theme_classic()+
+  ggtitle("Lasso Coefficient Estimates for Var1 from \n 100 Permutations")
+```
+
+
+Here we can display the permutation results from one of the variables that DID have a significant lasso coefficient. We see the vertical line of observed value is far from the permuted results. 
+
+```{r}
+
+observed_val <- final_results %>% filter(term == "var4") %>% select(estimate)
+
+ggplot(df, aes(x=var4)) +
+  geom_histogram(color="black", fill="green", alpha=.4) +
+  geom_vline(color="navy",lwd=1,lty=2,xintercept = observed_val$estimate) +
+  theme_classic()+
+  ggtitle("Lasso Coefficient Estimates for Var4 from \n 100 Permutations")
+```
+
+
 # Correlation matrix heatmap
 
 We discussed there was interest in plotting correlation matrix as a heatmap, here's how you would do that with the data. 
@@ -214,6 +250,11 @@ ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
  coord_fixed()
 ```
 
+
+# References
+
+I found the following helpful:
+https://bookdown.org/curleyjp0/psy317l_guides5/permutation-testing.html
 
 
 
