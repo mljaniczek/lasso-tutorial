@@ -1,0 +1,219 @@
+---
+title: "Lasso Example"
+knit: (function(input_file, encoding) {
+    rmarkdown::render(input_file,
+      encoding=encoding,
+      output_file=file.path(dirname(input_file),'index.html'))})
+author: "Margaret Janiczek"
+date: "4/19/2022"
+output: 
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Goals
+
+Lay out some reproducible code for doing lasso, group lasso, and calculate permuation p-values for coefficient estimates, using tidy functions and code throughout. Also, some pretty visualizations. 
+
+```{r libraries}
+# load relevant libraries for this tutorial
+library(tidyverse)
+library(tidymodels)
+library(glmnet)
+library(reshape2)
+library(gt)
+
+theme_set(theme_bw()) #setting ggplot theme 
+
+```
+
+# Data
+
+Load and prepare your data, do some basic summary like table 1 and maybe heatmap of values and/or correlations.
+
+This data, included in the glmnet package, has binary outcome and continuous variables.
+
+```{r}
+# load example data from glmnet package
+data("BinomialExample")
+
+# making variable names for this example data since it didn't come with them
+test_list <- c()
+for (i in 1:30){
+  test_list[i] <- paste0("var", i)
+}
+
+colnames(BinomialExample$x) <- test_list
+
+# reducing number of variables for demonstration purposes
+#BinomialExample$x <- BinomialExample$x[,c(1:20)]
+
+head(BinomialExample$x)
+
+head(BinomialExample$y)
+
+```
+
+# Fit Observed Data
+
+Use usual cross-validation procedure to find best lambda for lasso model. 
+
+```{r fit_observed_cv}
+
+cvfit <- cv.glmnet(BinomialExample$x, BinomialExample$y, 
+                 family = "binomial",
+                 type.measure = "class")
+
+plot(cvfit)
+
+coef(cvfit, s="lambda.min")
+
+```
+
+If you want, use some tidyverse functions to extract and present the results. 
+
+```{r}
+
+# get some tidy results from cv.glmnet
+tidied_cv <- tidy(cvfit)
+glance_cv <- glance(cvfit)
+
+tidied <- tidy(cvfit$glmnet.fit)
+
+# and plot them (but not the intercept)
+tidied %>%
+  filter(term != "(Intercept)") %>%
+ggplot( aes(lambda, estimate, group = term, color = term)) +
+  scale_x_log10() +
+  geom_line() +
+  geom_vline(xintercept = glance_cv$lambda.min)  # vertical line for min lambda
+
+  
+```
+
+# Permutation p-value calculation for estimates
+
+Since `cv.glmnet` does not provide p-values for estimates, you can do a permutation test to get empiric p-values. 
+
+In this procedure, we will scramble the y vector a set number of times (say, 1000), do the `cv.glmnet()` function with the scrambled outcome, and extract the estimates from the model. 
+
+Then, we will compare those estimates and calculate a p-value for each variable by summing the number of permuted estimates which are as or more extreme as the observed estimate, and dived by number of permutations. 
+
+Then we will adjust for multiple comparisons and present a final table of results.
+
+```{r}
+
+# this function will take your input of x and y and return tidy results from the minimum lambda cv result
+get_cv_result <- function(x, y){
+  cvfit <- cv.glmnet(x, y, 
+                 family = "binomial",
+                 type.measure = "class")
+  tidied_cv <- tidy(cvfit)
+  glance_cv <- glance(cvfit)
+  
+  tidied <- tidy(cvfit$glmnet.fit)
+  
+  allvars <- data.frame(term = colnames(x))
+  
+  tidied_min <- tidied %>%
+    filter(lambda == cvfit$lambda.min) %>%
+    right_join(allvars, by = "term") %>% #join to make sure you don't drop vars that went to zero in lasso estimation
+    select(term, estimate) %>%
+    mutate(term = factor(term, levels= str_sort(term, numeric=TRUE))) %>%
+    arrange(term) %>%
+    replace(is.na(.), 0)
+  return(tidied_min)
+}
+```
+
+
+```{r permutations}
+# get tidy result from observed data
+observed_result <- get_cv_result(BinomialExample$x, BinomialExample$y)
+
+# specify variable names and number of permutations
+variable_names <- colnames(BinomialExample$x)
+num_permutations = 100
+
+# set seed for reproducibility
+set.seed(1219)
+
+#set up loop for permutation results
+perm_results<-vector('list',num_permutations)
+perm_results_bigger <- vector('list',num_permutations)
+for(i in 1:num_permutations){
+  perm_y <- sample(BinomialExample$y)
+  res <- get_cv_result(BinomialExample$x, perm_y)
+  test <- left_join(observed_result, res, 
+                  by = "term",
+                  suffix = c(".obs", ".perm")) %>%
+    # calculating if permuation estimate is greater than or equal to observed estimate
+    mutate(bigger = as.numeric(abs(estimate.perm) >= abs(estimate.obs)))
+  perm_results[[i]]<-res$estimate 
+  perm_results_bigger[[i]] <- test$bigger
+}
+
+```
+
+
+```{r results-presentation, message = FALSE, warning=FALSE}
+
+#make nice dataframe from results to present them
+final_results <- bind_cols(perm_results_bigger)  %>%
+  mutate(sum = rowSums(across(where(is.numeric))),
+         # calculate p-value which is sum of times that permuted val is >= observed value, divided by number of permutations
+         perm_pval = sum/num_permutations,
+         term = observed_result$term,
+         estimate = round(observed_result$estimate, 3)) %>%
+  select(term, estimate, perm_pval) %>%
+  # and if you want to adjust for multiple testing you can do FDR correction like this, just specify the method. Here I'm using Benjamini Hochberg 
+  mutate(
+    qval = round(p.adjust(perm_pval, method = "BH"),2)
+  )
+
+# use gt to display results in a table
+gt::gt(final_results)
+
+```
+
+# Correlation matrix heatmap
+
+We discussed there was interest in plotting correlation matrix as a heatmap, here's how you would do that with the data. 
+
+```{r}
+# following exmaple from http://www.sthda.com/english/wiki/ggplot2-quick-correlation-matrix-heatmap-r-software-and-data-visualization
+
+library(reshape2)
+cormat <- round(cor(BinomialExample$x),2)
+head(cormat)
+
+get_upper_tri <- function(cormat){
+    cormat[lower.tri(cormat)]<- NA
+    return(cormat)
+  }
+upper_tri <- get_upper_tri(cormat)
+head(upper_tri)
+
+melted_cormat <- melt(upper_tri, na.rm = TRUE)
+head(melted_cormat)
+
+ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+ geom_tile(color = "white")+
+ scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+   name="Pearson\nCorrelation") +
+  theme_minimal()+ 
+ theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+    size = 12, hjust = 1))+
+ coord_fixed()
+```
+
+
+
+
