@@ -19,7 +19,7 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 
 # Goals
 
-Lay out some reproducible code for doing lasso, group lasso, and calculate permuation p-values for coefficient estimates, using tidy functions and code throughout. Also, some pretty visualizations. 
+Lay out some reproducible code for doing lasso, group lasso, and calculate permutation p-values for coefficient estimates, using tidy functions and code throughout. Also, some pretty visualizations. 
 
 ```{r libraries}
 # load relevant libraries for this tutorial
@@ -28,6 +28,7 @@ library(tidymodels)
 library(glmnet)
 library(reshape2)
 library(gt)
+library(gglasso)
 
 theme_set(theme_bw()) #setting ggplot theme 
 
@@ -217,6 +218,23 @@ ggplot(df, aes(x=var4)) +
   ggtitle("Lasso Coefficient Estimates for Var4 from \n 100 Permutations")
 ```
 
+# Group Lasso
+
+```{r}
+
+# load colon data set
+data(colon)
+
+# define group index
+group2 <- rep(1:20,each=5)
+
+# fit group lasso penalized logistic regression
+m2 <- gglasso(x=colon$x,y=colon$y,group=group2,loss="logit")
+
+```
+
+
+
 
 # Correlation matrix heatmap
 
@@ -256,5 +274,6 @@ ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
 I found the following helpful:
 https://bookdown.org/curleyjp0/psy317l_guides5/permutation-testing.html
 
+https://broom.tidymodels.org/reference/tidy.cv.glmnet.html
 
 
